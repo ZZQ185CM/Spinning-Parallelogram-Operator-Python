@@ -2,6 +2,49 @@
 
 这是一个用于光场深度估计的 SPO 算法 Python 版本，核心流程包括 EPI 构建、代价体生成、水平/垂直方向可靠性融合，以及 guided filter 后处理。
 
+## 来源说明与引用
+
+本仓库是基于原始 MATLAB 版本
+[`shuozh/Spinning-Parallelogram-Operator`](https://github.com/shuozh/Spinning-Parallelogram-Operator)
+整理和重写的 Python 实现，用于在 Python / NumPy / SciPy / CuPy 环境下复现和使用 SPO
+(Spinning Parallelogram Operator) 光场深度估计算法。
+
+需要区分的关系如下：
+
+- 原始算法、论文和最早公开代码来自 Shuo Zhang 等作者
+- 本仓库不是原作者发布的官方 Python 版本，而是基于其 MATLAB 实现思路改写的 Python 版本
+- 如果你的科研工作使用了本仓库或对应算法，建议在论文正文或项目说明中明确说明：本实现是基于原始 MATLAB 代码重写的 Python 版本
+
+原始仓库 README 中明确建议：科研使用应引用其 CVIU 2016 论文；商业使用请联系原作者。
+
+### 建议引用的原始论文
+
+Shuo Zhang, Hao Sheng, Chao Li, Jun Zhang and Zhang Xiong.  
+Robust depth estimation for light field via spinning parallelogram operator.  
+Computer Vision and Image Understanding, 145(C):148-159, 2016.
+
+### BibTeX
+
+```bibtex
+@article{Zhang2016Robust,
+  title={Robust depth estimation for light field via spinning parallelogram operator},
+  author={Zhang, Shuo and Sheng, Hao and Li, Chao and Zhang, Jun and Xiong, Zhang},
+  journal={Computer Vision and Image Understanding},
+  volume={145},
+  pages={148-159},
+  year={2016}
+}
+```
+
+### 推荐致谢写法
+
+如果你需要在论文、报告或仓库中说明来源，可以使用类似表述：
+
+> This repository is a Python reimplementation of the SPO method based on the
+> original MATLAB code released by Zhang et al. We cite the original CVIU 2016
+> paper for the algorithm and acknowledge the upstream repository:
+> https://github.com/shuozh/Spinning-Parallelogram-Operator
+
 ## 目录结构
 
 ```text
