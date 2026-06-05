@@ -18,7 +18,7 @@ def full_to_epi(img_RGB, num_view):
         img_view: Center view image
         focus_img: All-in-focus image
     """
-    mid_view = round(num_view / 2)
+    mid_view = num_view // 2
     height, width, nB = img_RGB.shape
     
     # Create horizontal EPI
