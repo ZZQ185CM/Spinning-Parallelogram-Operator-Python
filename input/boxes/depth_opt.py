@@ -8,12 +8,10 @@ disp_min = -2.2
 disp_max = 1.4
 
 # Options dictionary
-# SPO算法的shift方向与标准视差定义相反，需要取反并交换min/max
-# 用户设置的disp_min/disp_max是标准视差（正=近，负=远）
-# 算法内部的Dmin/Dmax需要反向
-# 乘法的数字与输入光场图像的分辨率有关，（NumView-1）/2可得
+# 与原始MATLAB版本保持一致，直接把标准视差范围映射到SPO的Dmin/Dmax
+# 乘法的数字与输入光场图像的视角数有关，NumView=9时为(NumView-1)/2=4
 opts = {
-    'Dmin': -disp_max * 4,  # 注意取反并交换
-    'Dmax': -disp_min * 4,  # 注意取反并交换
+    'Dmin': disp_min * 4,
+    'Dmax': disp_max * 4,
     'NumView': 9,
 }

@@ -7,13 +7,13 @@ from PIL import Image
 import os
 import sys
 import time
-from optimization.guidedfilter_color import guidedfilter_color
+from optimization.guidedfilter_color import guidedfilter_color_precompute, guidedfilter_color_runfilter
 
 # Try to import CuPy for GPU acceleration
 try:
     import cupy as cp
-    GPU_AVAILABLE = True
-except ImportError:
+    GPU_AVAILABLE = cp.cuda.runtime.getDeviceCount() > 0
+except Exception:
     cp = None
     GPU_AVAILABLE = False
 
@@ -67,15 +67,14 @@ def depth_integration(
     reliable_h = c1 / (c1 + c2)
     reliable_v = c2 / (c1 + c2)
     
-    # Debug: Check for NaN and zero divisions
     if use_gpu and GPU_AVAILABLE:
-        nan_count_h = cp.sum(cp.isnan(reliable_h))
-        nan_count_v = cp.sum(cp.isnan(reliable_v))
-        zero_sum = cp.sum(c1 + c2 == 0)
+        nan_count_h = int(cp.asnumpy(cp.sum(cp.isnan(reliable_h))))
+        nan_count_v = int(cp.asnumpy(cp.sum(cp.isnan(reliable_v))))
+        zero_sum = int(cp.asnumpy(cp.sum(c1 + c2 == 0)))
     else:
-        nan_count_h = np.sum(np.isnan(reliable_h))
-        nan_count_v = np.sum(np.isnan(reliable_v))
-        zero_sum = np.sum(c1 + c2 == 0)
+        nan_count_h = int(np.sum(np.isnan(reliable_h)))
+        nan_count_v = int(np.sum(np.isnan(reliable_v)))
+        zero_sum = int(np.sum(c1 + c2 == 0))
     
     print(f"Debug: NaN in reliable_h: {int(nan_count_h)}, in reliable_v: {int(nan_count_v)}")
     print(f"Debug: Pixels where c1+c2=0: {int(zero_sum)}")
@@ -84,16 +83,19 @@ def depth_integration(
     reliable_h = xp.nan_to_num(reliable_h, nan=0.0)
     reliable_v = xp.nan_to_num(reliable_v, nan=0.0)
     
-    # Debug: Check reliability values
     if use_gpu and GPU_AVAILABLE:
-        rel_h_cpu = cp.asnumpy(reliable_h)
-        rel_v_cpu = cp.asnumpy(reliable_v)
+        rel_h_min = float(cp.asnumpy(cp.min(reliable_h)))
+        rel_h_max = float(cp.asnumpy(cp.max(reliable_h)))
+        rel_v_min = float(cp.asnumpy(cp.min(reliable_v)))
+        rel_v_max = float(cp.asnumpy(cp.max(reliable_v)))
     else:
-        rel_h_cpu = reliable_h
-        rel_v_cpu = reliable_v
+        rel_h_min = float(np.min(reliable_h))
+        rel_h_max = float(np.max(reliable_h))
+        rel_v_min = float(np.min(reliable_v))
+        rel_v_max = float(np.max(reliable_v))
     
-    print(f"Debug: reliable_h range: [{rel_h_cpu.min():.3f}, {rel_h_cpu.max():.3f}]")
-    print(f"Debug: reliable_v range: [{rel_v_cpu.min():.3f}, {rel_v_cpu.max():.3f}]")
+    print(f"Debug: reliable_h range: [{rel_h_min:.3f}, {rel_h_max:.3f}]")
+    print(f"Debug: reliable_v range: [{rel_v_min:.3f}, {rel_v_max:.3f}]")
     
     # Expand reliability to match depth dimensions
     reliable_h = xp.repeat(reliable_h[:, :, xp.newaxis], nD, axis=2)
@@ -102,18 +104,22 @@ def depth_integration(
     # Combine horizontal and vertical cost volumes
     sumC = reliable_h * filter_h_xp + reliable_v * filter_v_xp
     
-    # Debug: Check sumC values
     if use_gpu and GPU_AVAILABLE:
-        sumC_cpu = cp.asnumpy(sumC)
+        sumC_min = float(cp.asnumpy(cp.min(sumC)))
+        sumC_max = float(cp.asnumpy(cp.max(sumC)))
     else:
-        sumC_cpu = sumC
+        sumC_min = float(np.min(sumC))
+        sumC_max = float(np.max(sumC))
     
-    print(f"Debug: sumC shape: {sumC_cpu.shape}")
-    print(f"Debug: sumC range: [{sumC_cpu.min():.3f}, {sumC_cpu.max():.3f}]")
+    print(f"Debug: sumC shape: {sumC.shape}")
+    print(f"Debug: sumC range: [{sumC_min:.3f}, {sumC_max:.3f}]")
     
     # Check if any depth layers are all zeros
     for d in range(min(3, nD)):
-        layer_sum = np.sum(np.abs(sumC_cpu[:, :, d]))
+        if use_gpu and GPU_AVAILABLE:
+            layer_sum = float(cp.asnumpy(cp.sum(cp.abs(sumC[:, :, d]))))
+        else:
+            layer_sum = float(np.sum(np.abs(sumC[:, :, d])))
         print(f"Debug: sumC layer {d} sum: {layer_sum:.3f}")
     
     # Get initial depth map
@@ -121,9 +127,8 @@ def depth_integration(
     # Transfer back to CPU for saving
     if use_gpu and GPU_AVAILABLE:
         labels_max = cp.asnumpy(labels_max)
-    # Map depth values to grayscale (inverted for proper visualization)
-    # Near (small index) -> bright (white), far (large index) -> dark (black)
-    save_img = np.uint8(np.clip(255 - (256 / nD) * labels_max, 0, 255))
+    # Match MATLAB: lower label (negative disparity/far) -> dark, higher label (positive disparity/near) -> bright.
+    save_img = np.uint8(np.clip((256 / nD) * labels_max, 0, 255))
     
     # Save initial depth map
     output_path = os.path.join(filepath_output, 'depth_initial.bmp')
@@ -133,37 +138,51 @@ def depth_integration(
     # Matching cost filtering calculation
     print("Applying guided filter to cost volume...")
     filter_start = time.time()
-    for d in range(nD):
-        # Transfer current slice to CPU for guided filter
-        if use_gpu and GPU_AVAILABLE:
-            p = cp.asnumpy(sumC[:, :, d])
-        else:
-            p = sumC[:, :, d]
-        
-        q = guidedfilter_color(
-            img_view.astype(np.float64),
-            p,
-            guided_filter_radius,
-            guided_filter_eps,
-            use_gpu=use_gpu,
-        )
-        
-        # Transfer result back to GPU if needed
-        if use_gpu and GPU_AVAILABLE:
-            sumC[:, :, d] = cp.asarray(q)
-        else:
-            sumC[:, :, d] = q
-        
-        # Progress bar
-        filter_elapsed = time.time() - filter_start
-        progress = (d + 1) / nD
-        bar_length = 30
-        filled_length = int(bar_length * progress)
-        bar = '#' * filled_length + '-' * (bar_length - filled_length)
-        sys.stdout.write(
-            f"\r过滤进度 [{bar}] {d + 1}/{nD} ({progress * 100:5.1f}%) | 总计 {filter_elapsed:.1f}s"
-        )
-        sys.stdout.flush()
+
+    gf_precomputed = guidedfilter_color_precompute(
+        img_view.astype(np.float64),
+        guided_filter_radius,
+        guided_filter_eps,
+        use_gpu=use_gpu,
+    )
+
+    if use_gpu and GPU_AVAILABLE:
+        depth_chunk_size = min(nD, 16)
+        for chunk_start in range(0, nD, depth_chunk_size):
+            chunk_end = min(chunk_start + depth_chunk_size, nD)
+            # Shape: (height, width, chunk_depth). Each depth slice is filtered independently.
+            sumC[:, :, chunk_start:chunk_end] = guidedfilter_color_runfilter(
+                gf_precomputed,
+                sumC[:, :, chunk_start:chunk_end],
+                return_cpu=False,
+            )
+
+            filter_elapsed = time.time() - filter_start
+            progress = chunk_end / nD
+            bar_length = 30
+            filled_length = int(bar_length * progress)
+            bar = '#' * filled_length + '-' * (bar_length - filled_length)
+            sys.stdout.write(
+                f"\r过滤进度 [{bar}] {chunk_end}/{nD} ({progress * 100:5.1f}%) | 总计 {filter_elapsed:.1f}s"
+            )
+            sys.stdout.flush()
+    else:
+        for d in range(nD):
+            sumC[:, :, d] = guidedfilter_color_runfilter(
+                gf_precomputed,
+                sumC[:, :, d],
+                return_cpu=False,
+            )
+
+            filter_elapsed = time.time() - filter_start
+            progress = (d + 1) / nD
+            bar_length = 30
+            filled_length = int(bar_length * progress)
+            bar = '#' * filled_length + '-' * (bar_length - filled_length)
+            sys.stdout.write(
+                f"\r过滤进度 [{bar}] {d + 1}/{nD} ({progress * 100:5.1f}%) | 总计 {filter_elapsed:.1f}s"
+            )
+            sys.stdout.flush()
     
     print()  # New line after progress bar
     
@@ -172,9 +191,8 @@ def depth_integration(
     # Transfer back to CPU for saving
     if use_gpu and GPU_AVAILABLE:
         sumD = cp.asnumpy(sumD)
-    # Map depth values to grayscale (inverted for proper visualization)
-    # Near (small index) -> bright (white), far (large index) -> dark (black)
-    save_img = np.uint8(np.clip(255 - (256 / nD) * sumD, 0, 255))
+    # Match MATLAB: lower label (negative disparity/far) -> dark, higher label (positive disparity/near) -> bright.
+    save_img = np.uint8(np.clip((256 / nD) * sumD, 0, 255))
     
     # Save filtered depth map
     output_path = os.path.join(filepath_output, 'depth_filtering.bmp')

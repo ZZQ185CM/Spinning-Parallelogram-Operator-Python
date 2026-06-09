@@ -13,14 +13,22 @@ from depth_integration import depth_integration
 # Try to import CuPy for GPU acceleration
 try:
     import cupy as cp
-    from cupyx.scipy.ndimage import convolve as cp_convolve
-    GPU_AVAILABLE = True
-    print("GPU acceleration enabled (CuPy detected)")
+    from cupyx.scipy.ndimage import correlate as cp_correlate
+    GPU_AVAILABLE = cp.cuda.runtime.getDeviceCount() > 0
+    if GPU_AVAILABLE:
+        print("GPU acceleration enabled (CuPy detected)")
+    else:
+        print("CuPy detected but no CUDA device found, using CPU mode")
 except ImportError:
     cp = None
     GPU_AVAILABLE = False
-    from scipy.ndimage import convolve
+    from scipy.ndimage import correlate
     print("GPU not available, using CPU mode")
+except Exception as exc:
+    cp = None
+    GPU_AVAILABLE = False
+    from scipy.ndimage import correlate
+    print(f"GPU unavailable ({exc}), using CPU mode")
 
 def SPO(
     filepath_input,
@@ -129,38 +137,69 @@ def SPO(
     # Cost volume generation
     print("Generating cost volume...")
     
-    # Choose convolution function based on backend
+    # MATLAB filter2 uses correlation semantics for this non-symmetric SPO kernel.
     if use_gpu and GPU_AVAILABLE:
-        conv_func = cp_convolve
+        filter_func = cp_correlate
     else:
-        conv_func = convolve
+        filter_func = correlate
     
     overall_start = time.time()
     for depth in range(nD):
         iter_start = time.time()
-        
-        for bin_idx in range(number_of_bins):
-            for b in range(nB):
-                hist_h = xp.zeros((height, width))
-                hist_v = xp.zeros((height, width))
-                
+
+        if use_gpu and GPU_AVAILABLE:
+            bin_chunk_size = min(number_of_bins, 16)
+            for bin_start in range(0, number_of_bins, bin_chunk_size):
+                bin_end = min(bin_start + bin_chunk_size, number_of_bins)
+                chunk_bins = bin_end - bin_start
+                hist_h = xp.zeros((height, width, chunk_bins, nB))
+                hist_v = xp.zeros((height, width, chunk_bins, nB))
                 for v in range(opts['NumView']):
-                    # Horizontal processing
-                    histogram_view = histogram_h[v::opts['NumView'], :, bin_idx, b]
-                    cal_view = conv_func(histogram_view.astype(xp.float32), 
-                                       w_h[v, :, depth].reshape(1, -1), 
-                                       mode='constant')
-                    hist_h += cal_view
-                    
-                    # Vertical processing
-                    histogram_view = histogram_v[:, v::opts['NumView'], bin_idx, b]
-                    cal_view = conv_func(histogram_view.astype(xp.float32), 
-                                       w_v[:, v, depth].reshape(-1, 1), 
-                                       mode='constant')
-                    hist_v += cal_view
-                
-                filter_h[:, :, depth] += hist_h ** 2
-                filter_v[:, :, depth] += hist_v ** 2
+                    # Shapes: histogram_view_h=(height, width, chunk_bins, channels), kernel=(1, match, 1, 1).
+                    histogram_view_h = histogram_h[v::opts['NumView'], :, bin_start:bin_end, :]
+                    cal_view_h = filter_func(
+                        histogram_view_h.astype(xp.float32),
+                        w_h[v, :, depth].reshape(1, -1, 1, 1),
+                        mode='constant',
+                    )
+                    hist_h += cal_view_h
+
+                    # Shapes: histogram_view_v=(height, width, chunk_bins, channels), kernel=(match, 1, 1, 1).
+                    histogram_view_v = histogram_v[:, v::opts['NumView'], bin_start:bin_end, :]
+                    cal_view_v = filter_func(
+                        histogram_view_v.astype(xp.float32),
+                        w_v[:, v, depth].reshape(-1, 1, 1, 1),
+                        mode='constant',
+                    )
+                    hist_v += cal_view_v
+
+                for bin_offset in range(chunk_bins):
+                    for b in range(nB):
+                        filter_h[:, :, depth] += hist_h[:, :, bin_offset, b] ** 2
+                        filter_v[:, :, depth] += hist_v[:, :, bin_offset, b] ** 2
+        else:
+            for bin_idx in range(number_of_bins):
+                for b in range(nB):
+                    hist_h = xp.zeros((height, width))
+                    hist_v = xp.zeros((height, width))
+
+                    for v in range(opts['NumView']):
+                        # Horizontal processing
+                        histogram_view = histogram_h[v::opts['NumView'], :, bin_idx, b]
+                        cal_view = filter_func(histogram_view.astype(xp.float32),
+                                               w_h[v, :, depth].reshape(1, -1),
+                                               mode='constant')
+                        hist_h += cal_view
+
+                        # Vertical processing
+                        histogram_view = histogram_v[:, v::opts['NumView'], bin_idx, b]
+                        cal_view = filter_func(histogram_view.astype(xp.float32),
+                                               w_v[:, v, depth].reshape(-1, 1),
+                                               mode='constant')
+                        hist_v += cal_view
+
+                    filter_h[:, :, depth] += hist_h ** 2
+                    filter_v[:, :, depth] += hist_v ** 2
         
         # Progress bar
         iter_elapsed = time.time() - iter_start
@@ -176,21 +215,35 @@ def SPO(
     
     print()  # New line after progress bar
     
-    # Transfer results back to CPU if using GPU
-    if use_gpu and GPU_AVAILABLE:
-        filter_h = cp.asnumpy(filter_h)
-        filter_v = cp.asnumpy(filter_v)
-    
     # Debug: Check filter values
+    if use_gpu and GPU_AVAILABLE:
+        filter_h_min = float(cp.asnumpy(cp.min(filter_h)))
+        filter_h_max = float(cp.asnumpy(cp.max(filter_h)))
+        filter_v_min = float(cp.asnumpy(cp.min(filter_v)))
+        filter_v_max = float(cp.asnumpy(cp.max(filter_v)))
+        upper_h_min = float(cp.asnumpy(cp.min(filter_h[:100, :, :])))
+        upper_h_max = float(cp.asnumpy(cp.max(filter_h[:100, :, :])))
+        upper_v_min = float(cp.asnumpy(cp.min(filter_v[:100, :, :])))
+        upper_v_max = float(cp.asnumpy(cp.max(filter_v[:100, :, :])))
+    else:
+        filter_h_min = float(filter_h.min())
+        filter_h_max = float(filter_h.max())
+        filter_v_min = float(filter_v.min())
+        filter_v_max = float(filter_v.max())
+        upper_h = filter_h[:100, :, :]
+        upper_v = filter_v[:100, :, :]
+        upper_h_min = float(upper_h.min())
+        upper_h_max = float(upper_h.max())
+        upper_v_min = float(upper_v.min())
+        upper_v_max = float(upper_v.max())
+
     print(f"\nDebug Info:")
-    print(f"filter_h shape: {filter_h.shape}, range: [{filter_h.min():.3f}, {filter_h.max():.3f}]")
-    print(f"filter_v shape: {filter_v.shape}, range: [{filter_v.min():.3f}, {filter_v.max():.3f}]")
+    print(f"filter_h shape: {filter_h.shape}, range: [{filter_h_min:.3f}, {filter_h_max:.3f}]")
+    print(f"filter_v shape: {filter_v.shape}, range: [{filter_v_min:.3f}, {filter_v_max:.3f}]")
     
     # Check upper region
-    upper_h = filter_h[:100, :, :]
-    upper_v = filter_v[:100, :, :]
-    print(f"Upper region filter_h range: [{upper_h.min():.3f}, {upper_h.max():.3f}]")
-    print(f"Upper region filter_v range: [{upper_v.min():.3f}, {upper_v.max():.3f}]")
+    print(f"Upper region filter_h range: [{upper_h_min:.3f}, {upper_h_max:.3f}]")
+    print(f"Upper region filter_v range: [{upper_v_min:.3f}, {upper_v_max:.3f}]")
     
     # Depth optimization
     print("\nPerforming depth integration and optimization...")
