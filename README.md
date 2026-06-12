@@ -1,23 +1,21 @@
 # SPO (Spinning Parallelogram Operator) - Python Implementation
 
-这是一个用于光场深度估计的 SPO 算法 Python 版本，核心流程包括 EPI 构建、代价体生成、水平/垂直方向可靠性融合，以及 guided filter 后处理。
+This repository provides a Python implementation of the SPO (Spinning Parallelogram Operator) method for light field depth estimation. The main pipeline includes EPI construction, cost-volume generation, reliability-based horizontal/vertical cost fusion, and guided-filter post-processing.
 
-## 来源说明与引用
+## Attribution and Citation
 
-本仓库是基于原始 MATLAB 版本
-[`shuozh/Spinning-Parallelogram-Operator`](https://github.com/shuozh/Spinning-Parallelogram-Operator)
-整理和重写的 Python 实现，用于在 Python / NumPy / SciPy / CuPy 环境下复现和使用 SPO
-(Spinning Parallelogram Operator) 光场深度估计算法。
+This repository is a Python reimplementation based on the original MATLAB version:
+[`shuozh/Spinning-Parallelogram-Operator`](https://github.com/shuozh/Spinning-Parallelogram-Operator).
 
-需要区分的关系如下：
+Please note the distinction:
 
-- 原始算法、论文和最早公开代码来自 Shuo Zhang 等作者
-- 本仓库不是原作者发布的官方 Python 版本，而是基于其 MATLAB 实现思路改写的 Python 版本
-- 如果你的科研工作使用了本仓库或对应算法，建议在论文正文或项目说明中明确说明：本实现是基于原始 MATLAB 代码重写的 Python 版本
+- The original algorithm, paper, and MATLAB implementation are from Shuo Zhang et al.
+- This repository is not an official Python release by the original authors.
+- If you use this repository or the SPO algorithm in research, please cite the original paper and mention that this is a Python reimplementation based on the MATLAB code.
 
-原始仓库 README 中明确建议：科研使用应引用其 CVIU 2016 论文；商业使用请联系原作者。
+The original repository states that research use should cite the CVIU 2016 paper, and commercial use should contact the original authors.
 
-### 建议引用的原始论文
+### Original Paper
 
 Shuo Zhang, Hao Sheng, Chao Li, Jun Zhang and Zhang Xiong.  
 Robust depth estimation for light field via spinning parallelogram operator.  
@@ -36,83 +34,83 @@ Computer Vision and Image Understanding, 145(C):148-159, 2016.
 }
 ```
 
-### 推荐致谢写法
+### Suggested Acknowledgement
 
-如果你需要在论文、报告或仓库中说明来源，可以使用类似表述：
+```text
+This repository is a Python reimplementation of the SPO method based on the
+original MATLAB code released by Zhang et al. We cite the original CVIU 2016
+paper for the algorithm and acknowledge the upstream repository:
+https://github.com/shuozh/Spinning-Parallelogram-Operator
+```
 
-> This repository is a Python reimplementation of the SPO method based on the
-> original MATLAB code released by Zhang et al. We cite the original CVIU 2016
-> paper for the algorithm and acknowledge the upstream repository:
-> https://github.com/shuozh/Spinning-Parallelogram-Operator
-
-## 目录结构
+## Repository Structure
 
 ```text
 SPO-Python-cleaned/
-|-- config.json                 # 全局计算参数
-|-- main.py                     # 程序入口
-|-- spo.py                      # SPO 主流程
-|-- full_to_epi.py              # 光场拼接图到 EPI 的转换
-|-- depth_integration.py        # 代价融合与 guided filter 后处理
-|-- optimization/               # guided filter 等模块
+|-- config.json                 # Global runtime parameters
+|-- main.py                     # Entry point
+|-- spo.py                      # Main SPO pipeline
+|-- full_to_epi.py              # Light field mosaic to EPI conversion
+|-- depth_integration.py        # Cost fusion and guided-filter post-processing
+|-- optimization/               # Guided filter and related modules
 |-- input/
 |   `-- boxes/
-|       |-- lf.png              # 输入光场拼接图
-|       `-- depth_opt.py        # 当前场景的视差范围和视角数
+|       |-- lf.png              # Input light field mosaic image
+|       `-- depth_opt.py        # Scene-specific disparity range and view count
 `-- result/
-    `-- boxes/                  # 输出结果
+    `-- boxes/                  # Output directory
 ```
 
-## 依赖
+## Dependencies
 
-CPU 模式：
+CPU mode:
 
 ```bash
 pip install numpy pillow scipy
 ```
 
-GPU 模式可额外安装 CuPy，程序会自动检测：
+GPU acceleration is optional. If CuPy is installed, the code will use it automatically when `use_gpu` is enabled:
 
 ```bash
 pip install cupy-cuda12x
 ```
 
-请根据你的 CUDA 版本替换为对应的 CuPy 包。
+Install the CuPy package that matches your CUDA version.
 
-## 使用方法
+## Usage
 
-1. 准备输入数据：
-   - 将光场拼接图放到 `input/boxes/lf.png`
-   - 在 `input/boxes/depth_opt.py` 中设置该场景的 `disp_min`、`disp_max`、`NumView`
-2. 编辑 `config.json`：
-   - 这里放的是全局计算参数，例如 `scale`、`bins`、`nD`、`sigma`
-   - guided filter 的 `guided_filter_radius`、`guided_filter_eps` 也在这里修改
-3. 运行：
+1. Prepare input data:
+   - Put the light field mosaic image at `input/boxes/lf.png`.
+   - Set the scene-specific `disp_min`, `disp_max`, and `NumView` in `input/boxes/depth_opt.py`.
+2. Edit `config.json`:
+   - This file stores global runtime parameters such as `scale`, `bins`, `nD`, and `sigma`.
+   - Guided filter parameters, `guided_filter_radius` and `guided_filter_eps`, are also configured here.
+3. Run the program:
 
 ```bash
 python main.py
 ```
 
-程序会自动读取：
+The program reads:
 
-- `config.json`：全局计算参数
-- `input/boxes/depth_opt.py`：当前光场场景的视差范围和视角数
+- `config.json`: global runtime parameters
+- `input/boxes/depth_opt.py`: scene-specific disparity range and number of views
 
-## 参数来源说明
+## Parameter Sources
 
 ### `config.json`
 
-以下参数是全局运行参数，用户直接编辑这个文件即可：
+These global runtime parameters should be edited directly in `config.json`:
 
-- `scale`: SPO 窗口宽度
-- `bins`: 直方图 bin 数量
-- `nD`: 深度标签数量
-- `sigma`: 水平/垂直方向可靠性融合参数
-- `guided_filter_radius`: guided filter 半径
-- `guided_filter_eps`: guided filter 正则项
-- `use_gpu`: 是否优先使用 GPU
+- `scale`: SPO window-width parameter
+- `bins`: number of histogram bins
+- `nD`: number of depth labels
+- `sigma`: reliability-fusion parameter for horizontal and vertical EPI costs
+- `guided_filter_radius`: guided filter radius
+- `guided_filter_eps`: guided filter regularization term
+- `use_gpu`: whether to prefer GPU acceleration
 
-默认内容如下：
+Default configuration:
 
 ```json
 {
@@ -128,33 +126,33 @@ python main.py
 
 ### `input/<scene>/depth_opt.py`
 
-以下参数继续按每个具体光场场景单独配置：
+The following parameters remain scene-specific and are loaded from each scene's `depth_opt.py`:
 
 - `disp_min`
 - `disp_max`
 - `NumView`
 
-也就是说，视差范围仍然不从 `config.json` 读取，而是从每个场景自己的 `depth_opt.py` 读取。
+In other words, the disparity range is not read from `config.json`; it is read from the current light field scene configuration.
 
-## 输出结果
+## Outputs
 
-运行完成后会在 `result/boxes/` 下生成：
+After running the program, outputs are written to `result/boxes/`:
 
-- `depth_initial.bmp`: 融合前的初始深度图
-- `depth_filtering.bmp`: guided filter 后的深度图
+- `depth_initial.bmp`: initial depth map before guided filtering
+- `depth_filtering.bmp`: depth map after guided filtering
 
-## 算法流程
+## Algorithm Pipeline
 
-1. 从光场拼接图中构建水平/垂直 EPI
-2. 对不同深度标签生成代价体
-3. 计算水平/垂直方向的可靠性权重
-4. 融合代价体并得到初始深度图
-5. 使用 guided filter 对每个深度切片进行后处理
-6. 输出过滤后的深度结果
+1. Build horizontal and vertical EPIs from the light field mosaic.
+2. Generate a matching cost volume over discrete depth labels.
+3. Estimate reliability weights for horizontal and vertical directions.
+4. Fuse the directional cost volumes and produce an initial depth map.
+5. Apply guided filtering to each depth-cost slice.
+6. Save the filtered depth result.
 
-## 说明
+## Notes
 
-- 当前入口默认处理 `input/boxes/`
-- 若 `use_gpu=true` 但环境中没有 CuPy，程序会自动退回 CPU
-- `nD` 会显著影响计算时间和显存占用
-- `disp_min/disp_max` 的配置方式请以各场景 `depth_opt.py` 中的注释为准
+- The default entry point processes `input/boxes/`.
+- If `use_gpu` is `true` but CuPy is not installed, the program automatically falls back to CPU mode.
+- `nD` has a large impact on runtime and memory usage.
+- Configure `disp_min` and `disp_max` according to the comments in each scene's `depth_opt.py`.

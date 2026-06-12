@@ -1,17 +1,17 @@
-# SPO 参数配置指南
+# SPO Parameter Configuration Guide
 
-## 参数分工
+## Parameter Scope
 
-现在参数分为两类：
+The parameters are divided into two groups:
 
 1. `config.json`
-   - 放全局计算参数
-   - 用户直接编辑这个文件即可
+   - Stores global runtime parameters.
+   - Users can edit this file directly.
 2. `input/<scene>/depth_opt.py`
-   - 放当前具体光场场景的几何参数
-   - 视差范围仍然从这里读取，不放到 `config.json`
+   - Stores scene-specific geometric parameters.
+   - The disparity range is still loaded from this file, not from `config.json`.
 
-当前 `config.json` 默认内容：
+Default `config.json`:
 
 ```json
 {
@@ -25,121 +25,123 @@
 }
 ```
 
-## 需要在 `depth_opt.py` 中配置的参数
+## Parameters Configured in `depth_opt.py`
 
-这些参数与具体数据集绑定：
+These parameters are tied to each specific light field scene:
 
-- `disp_min`: 场景最小视差
-- `disp_max`: 场景最大视差
-- `NumView`: 每个维度的视角数
+- `disp_min`: minimum scene disparity
+- `disp_max`: maximum scene disparity
+- `NumView`: number of angular views per dimension
 
-## `config.json` 参数说明
+Different light field scenes usually have different disparity ranges and angular sampling. Keeping these parameters in each scene folder reduces the risk of running a scene with the wrong geometry.
+
+## Parameters Configured in `config.json`
 
 ### 1. `scale`
 
-作用：控制 SPO 权重窗口的宽度。
+Purpose: controls the width of the SPO weighting window.
 
-建议：
+Suggested values:
 
-- 纹理丰富、细节多：`0.6 ~ 1.0`
-- 一般场景：`1.0 ~ 1.5`
-- 平滑区域多、噪声偏大：`1.5 ~ 2.0`
+- Rich texture and fine details: `0.6 ~ 1.0`
+- General scenes: `1.0 ~ 1.5`
+- Smooth regions or stronger noise: `1.5 ~ 2.0`
 
-现象判断：
+Symptoms and adjustment:
 
-- 深度边缘发糊：减小 `scale`
-- 深度噪点较多：增大 `scale`
+- Blurry depth boundaries: decrease `scale`
+- Noisy or unstable depth maps: increase `scale`
 
 ### 2. `bins`
 
-作用：控制颜色直方图的离散精度。
+Purpose: controls the quantization precision of the color histogram.
 
-建议：
+Suggested values:
 
-- 颜色和纹理变化丰富：`128 ~ 256`
-- 一般场景：`64 ~ 128`
-- 噪声较大或颜色单调：`16 ~ 64`
+- Rich color and texture variations: `128 ~ 256`
+- General scenes: `64 ~ 128`
+- Strong noise or low color diversity: `16 ~ 64`
 
-现象判断：
+Symptoms and adjustment:
 
-- 颜色信息没有充分利用：增大 `bins`
-- 对噪声过于敏感：减小 `bins`
+- Color information is underused: increase `bins`
+- Too sensitive to image noise: decrease `bins`
 
 ### 3. `nD`
 
-作用：深度标签数量，直接影响深度分辨率和计算量。
+Purpose: number of depth labels. This directly affects depth resolution and computational cost.
 
-建议：
+Suggested values:
 
-- 快速测试：`32 ~ 64`
-- 常规使用：`96 ~ 128`
-- 更高精度：`160 ~ 256`
+- Fast testing: `32 ~ 64`
+- Regular use: `96 ~ 128`
+- Higher precision: `160 ~ 256`
 
-现象判断：
+Symptoms and adjustment:
 
-- 深度图有明显阶梯感：增大 `nD`
-- 运行太慢或显存不足：减小 `nD`
+- Visible stair-step artifacts in the depth map: increase `nD`
+- Runtime is too long or GPU memory is insufficient: decrease `nD`
 
-这是最影响计算时间的全局参数之一。
+This is one of the most important runtime parameters.
 
 ### 4. `sigma`
 
-作用：控制水平 EPI 和垂直 EPI 的可靠性融合强度。
+Purpose: controls the reliability fusion strength between horizontal and vertical EPI costs.
 
-建议：
+Suggested values:
 
-- 水平或垂直方向纹理非常明显：`0.2 ~ 0.4`
-- 两个方向纹理比较均衡：`0.4 ~ 0.7`
-- 纹理方向性弱、希望更稳：`0.7 ~ 1.0`
+- Strong directional texture: `0.2 ~ 0.4`
+- Balanced horizontal and vertical textures: `0.4 ~ 0.7`
+- Weak texture directionality and more stable fusion: `0.7 ~ 1.0`
 
-现象判断：
+Symptoms and adjustment:
 
-- 某一方向纹理主导很强：保持较小 `sigma`
-- 想让两个方向融合更平稳：适当增大 `sigma`
+- One directional texture dominates strongly: keep `sigma` relatively small
+- Horizontal and vertical costs should be blended more smoothly: increase `sigma`
 
 ### 5. `guided_filter_radius`
 
-作用：guided filter 的空间半径，影响后处理平滑范围。
+Purpose: spatial radius of the guided filter. It controls the smoothing range during post-processing.
 
-建议：
+Suggested values:
 
-- 保留细节和边缘：`5 ~ 10`
-- 一般场景：`10 ~ 15`
-- 更强平滑去噪：`15 ~ 20`
+- Preserve details and boundaries: `5 ~ 10`
+- General scenes: `10 ~ 15`
+- Stronger smoothing and denoising: `15 ~ 20`
 
-现象判断：
+Symptoms and adjustment:
 
-- 深度图边缘被抹平：减小 `guided_filter_radius`
-- 深度图噪点或孔洞较多：增大 `guided_filter_radius`
+- Depth boundaries are oversmoothed: decrease `guided_filter_radius`
+- Depth map has many noisy points or holes: increase `guided_filter_radius`
 
 ### 6. `guided_filter_eps`
 
-作用：guided filter 正则项，影响边缘保持与平滑强度的平衡。
+Purpose: regularization term of the guided filter. It balances edge preservation and smoothing strength.
 
-建议：
+Suggested values:
 
-- 更强边缘保持：`1e-5 ~ 5e-5`
-- 一般场景：`1e-4 ~ 5e-4`
-- 更强平滑：`1e-3 ~ 1e-2`
+- Stronger edge preservation: `1e-5 ~ 5e-5`
+- General scenes: `1e-4 ~ 5e-4`
+- Stronger smoothing: `1e-3 ~ 1e-2`
 
-现象判断：
+Symptoms and adjustment:
 
-- 边界需要更锐利：减小 `guided_filter_eps`
-- 边界毛刺或噪点较多：增大 `guided_filter_eps`
+- Boundaries should be sharper: decrease `guided_filter_eps`
+- Boundaries have artifacts or noise: increase `guided_filter_eps`
 
 ### 7. `use_gpu`
 
-作用：是否优先启用 GPU。
+Purpose: whether to prefer GPU acceleration.
 
-说明：
+Behavior:
 
-- 设为 `true`：优先尝试 CuPy
-- 设为 `false`：强制使用 CPU
-- 即使设为 `true`，若环境中没有 CuPy，程序也会自动回退到 CPU
+- `true`: try to use CuPy acceleration
+- `false`: force CPU mode
+- If `true` but CuPy is unavailable, the program automatically falls back to CPU mode
 
-## 推荐起始配置
+## Recommended Starting Configurations
 
-### 通用场景
+### General Scene
 
 ```json
 {
@@ -153,7 +155,7 @@
 }
 ```
 
-### 高纹理场景
+### High-Texture Scene
 
 ```json
 {
@@ -167,12 +169,12 @@
 }
 ```
 
-### 高噪声场景
+### High-Noise Scene
 
 ```json
 {
   "scale": 1.0,
-  "bins": 32 or 16,
+  "bins": 32,
   "nD": 64,
   "sigma": 0.3,
   "guided_filter_radius": 10,
@@ -181,9 +183,13 @@
 }
 ```
 
-## 推荐调参顺序
+For high-noise scenes, `bins` can also be reduced to `16` when the color histogram is too sensitive to noise.
 
-1. 先在 `depth_opt.py` 里把 `disp_min` / `disp_max` / `NumView` 设对
-2. 再在 `config.json` 里调 `nD`
-3. 然后按效果调 `scale` 和 `sigma`
-4. 最后再调 `guided_filter_radius` 和 `guided_filter_eps`
+## Recommended Tuning Order
+
+1. First set `disp_min`, `disp_max`, and `NumView` correctly in `depth_opt.py`.
+2. Tune `nD` in `config.json`.
+3. Tune `scale` and `sigma` according to the visual result.
+4. Finally tune `guided_filter_radius` and `guided_filter_eps`.
+
+This order is safer because an incorrect disparity range cannot usually be fixed by tuning global runtime parameters.
